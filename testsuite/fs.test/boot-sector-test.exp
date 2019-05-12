@@ -1,0 +1,21 @@
+set test "boot sector testing"
+
+proc compare_output {filename i} {
+    global tool
+
+    set test_output [exec ./${tool} --test-boot-sector --image $filename --invalid-image]
+    set good_output [exec ./${tool}-good --test-boot-sector --image $filename --invalid-image]
+
+    if {[string compare $test_output $good_output] == 0} {
+	pass "boot-sector-test/$i"
+    } else {
+	fail "boot-sector-test/$i"
+    }
+}
+
+for {set i 0} {$i < 50} {incr i} {
+    system "bins/gen-image > input/ms0.img"
+    compare_output "input/ms0.img" $i
+}
+
+system "rm input/ms0.img"

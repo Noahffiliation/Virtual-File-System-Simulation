@@ -1,0 +1,20 @@
+set test "directory entry testing"
+
+proc compare_output {filename entry} {
+    global tool
+
+    set test_output [exec ./${tool} --test-directory-entry $entry --image $filename]
+    set good_output [exec ./${tool}-good --test-directory-entry $entry --image $filename]
+
+    if {[string compare $test_output $good_output] == 0} {
+	pass "$filename/directory-entry-test/$entry"
+    } else {
+	fail "$filename/directory-entry-test/$entry"
+    }
+}
+
+foreach image {vfs-empty vfs-one-file vfs-one-directory vfs-hidden vfs-1 vfs-attrs} {
+    for {set i 0} {$i < 50} {incr i} {
+	compare_output "images/$image" $i
+    }
+}

@@ -1,0 +1,2 @@
+set srcdir ./testsuite
+set objdir .

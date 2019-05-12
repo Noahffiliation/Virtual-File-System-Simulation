@@ -1,0 +1,40 @@
+set test "write file data testing"
+
+proc partial_test {tool filename type} {
+    set image output/$type-image
+    system cp $filename $image
+    system $tool --write-fs-data --image $image
+    system "mcopy -i $image ::ANSWERS.TXT output/$type-answers.txt || true"
+    system rm $image
+}
+
+proc compare_output {filename} {
+    global tool
+
+    try {
+	partial_test ./${tool} $filename test
+	partial_test ./${tool}-good $filename good
+
+	if {[file exists output/good-answers.txt]} {
+	    if {[diff output/test-answers.txt output/good-answers.txt] == 1} {
+		pass "$filename/write-fs-data"
+	    } else {
+		fail "$filename/write-fs-data"
+	    }
+	} else {
+	    if {[file exists output/test-answers.txt]} {
+		fail "$filename/write-fs-data (too full)"
+	    } else {
+		pass "$filename/write-fs-data (too full)"
+	    }
+	}
+    } trap CHILDSTATUS {results options} {
+	puts "something bad happened"
+	fail "$filename/write-fs-data"
+    }
+    system rm -f output/test-answers.txt output/good-answers.txt
+}
+
+foreach image {one-file one-directory hidden 1 2 3 4 5 deep-directory interleaved big-dirs empty} {
+    compare_output "images/vfs-$image"
+}

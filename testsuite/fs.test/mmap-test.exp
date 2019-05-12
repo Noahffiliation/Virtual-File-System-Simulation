@@ -1,0 +1,21 @@
+set test "mmap() testing"
+
+proc compare_output {filename i} {
+    global tool
+
+    set test_output [exec cat input/ms0-map-test.in | ./${tool} --test-mmap --image $filename --invalid-image]
+    set good_output [exec cat input/ms0-map-test.in | ./${tool}-good --test-mmap --image $filename --invalid-image]
+
+    if {[string compare $test_output $good_output] == 0} {
+	pass "mmap-test $i"
+    } else {
+	fail "mmap-test $i"
+    }
+}
+
+for {set i 0} {$i < 50} {incr i} {
+    system "bins/gen-image > input/ms0.img"
+    compare_output "input/ms0.img" $i
+}
+
+system "rm input/ms0.img"

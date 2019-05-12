@@ -1,0 +1,26 @@
+set test "output file data testing"
+
+proc compare_output {filename test} {
+    global tool
+
+    try {
+	set test_output [exec ./${tool} $test --image $filename]
+	set good_output [exec ./${tool}-good $test --image $filename]
+
+	if {[string compare $test_output $good_output] == 0} {
+	    pass "$filename/$test"
+	} else {
+	    fail "$filename/$test"
+	}
+    } trap CHILDSTATUS {results options} {
+	puts "something bad happened"
+	fail "$filename/$test"
+    }
+}
+
+foreach image {one-file one-directory hidden 1 2 3 4 5} {
+    foreach test {num-entries space-usage largest-file cookie num-dir-levels oldest-file} {
+	compare_output "images/vfs-$image" "--test-$test"
+    }
+    compare_output "images/vfs-$image" --output-fs-data
+}

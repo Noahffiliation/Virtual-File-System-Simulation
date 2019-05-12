@@ -1,0 +1,26 @@
+set test "file contents testing"
+
+proc compare_output {filename} {
+    global tool
+
+    try {
+	set check_name [exec shuf -n 1 input/ms3-$filename.list]
+	set test_output [exec ./${tool} --test-file-contents $check_name --image images/$filename]
+	set good_output [exec ./${tool}-good --test-file-contents $check_name --image images/$filename]
+
+	if {[string compare $test_output $good_output] == 0} {
+	    pass "$filename/file-contents-test ($check_name)"
+	} else {
+	    fail "$filename/file-contents-test ($check_name)"
+	}
+    } trap CHILDSTATUS {results options} {
+	puts "something bad happened"
+	fail "$filename/file-contents-test ($check_name)"
+    }
+}
+
+foreach image {vfs-one-file vfs-one-directory vfs-hidden vfs-1 vfs-2} {
+    for {set i 0} {$i < 50} {incr i} {
+	compare_output $image
+    }
+}

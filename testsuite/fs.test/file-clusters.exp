@@ -1,0 +1,30 @@
+set test "directory entry testing"
+
+proc compare_output {filename entry} {
+    global tool
+
+    try {
+	set first_cluster [exec ./${tool}-good --test-directory-entry $entry --image $filename | grep Start | awk "{ print \$3 }"]
+    } trap CHILDSTATUS {results options} {
+	return
+    }
+
+    try {
+	set test_output [exec ./${tool} --test-file-clusters $first_cluster --image $filename]
+	set good_output [exec ./${tool}-good --test-file-clusters $first_cluster --image $filename]
+
+	if {[string compare $test_output $good_output] == 0} {
+	    pass "$filename/file-clusters-test/$entry"
+	} else {
+	    fail "$filename/file-clusters-test/$entry"
+	}
+    } trap CHILDSTATUS {results options} {
+	fail "$filename/file-clusters-test/$entry"
+    }
+}
+
+foreach image {vfs-empty vfs-one-file vfs-one-directory vfs-hidden vfs-1} {
+    for {set i 0} {$i < 50} {incr i} {
+	compare_output "images/$image" $i
+    }
+}
