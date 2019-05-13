@@ -771,6 +771,8 @@ int main(int argc, char **argv) {
                 cluster = atoi(optarg);
                 mode = c;
                 break;
+            case 'v':
+                break;
             case 'b':
             case 'm':
             case 'n':
