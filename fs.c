@@ -6,6 +6,24 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
+// Struct for storing image data
+struct fs_data {
+    int bytes_per_sector, sectors_per_cluster, reserved_sectors, number_of_fats, sectors_per_fat, num_logical_sectors;
+    int max_root_directory_entries, max_entries;
+    int media_descriptor;
+    int root_directory_start;
+    int fat_start, fat_size;
+} data;
+
+// Struct for storing entry data
+struct entry {
+    int create_date, day, month, year;
+    int create_time, seconds, minutes, hours, ms;
+    int access_date, access_day, access_month, access_year;
+    int modify_date, modify_day, modify_month, modify_year;
+    int modify_time, modify_seconds, modify_minutes, modify_hours, modify_ms;
+} entry_data;
+
 // Read from a specific place in the filesystem
 unsigned int get_bytes(void *file_system, int offset, int size) {
     unsigned int bytes = 0;
@@ -16,9 +34,74 @@ unsigned int get_bytes(void *file_system, int offset, int size) {
     return bytes;
 }
 
+// Add image data to structure
+void build_fs_data(void *file_system) {
+    data.bytes_per_sector = get_bytes(file_system, 0x00B, 2);
+    data.sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
+    data.reserved_sectors = get_bytes(file_system, 0x00E, 2);
+    data.number_of_fats = get_bytes(file_system, 0x010, 1);
+    data.fat_start = data.bytes_per_sector * data.reserved_sectors;
+    data.max_root_directory_entries = get_bytes(file_system, 0x011, 2);
+    data.num_logical_sectors = get_bytes(file_system, 0x013, 2);
+    data.media_descriptor = get_bytes(file_system, 0x015, 1);
+    data.sectors_per_fat = get_bytes(file_system, 0x016, 2);
+    data.fat_size = data.bytes_per_sector * data.sectors_per_fat;
+    data.root_directory_start = (data.bytes_per_sector * data.reserved_sectors) + (data.bytes_per_sector * data.sectors_per_fat * data.number_of_fats);
+    data.max_entries = get_bytes(file_system, 0x011, 2);
+}
+
+// Add entry data to structure
+void build_entry_data(void *file_system, int offset, int root_directory_entry_offset) {
+    // Get date created information of entry
+    entry_data.create_date = get_bytes(file_system, offset + root_directory_entry_offset + 0x10, 2);
+    entry_data.day = entry_data.create_date & 0b11111;
+    entry_data.month = (entry_data.create_date >> 5) & 0b1111;
+    entry_data.year = (entry_data.create_date >> 9) & 0b1111111;
+    entry_data.year += 1980;
+    
+    // Get time created information of entry
+    entry_data.create_time = get_bytes(file_system, offset + root_directory_entry_offset + 0x0E, 2);
+    // We only get 0-29 seconds, so multiply by 2 to get a full 60
+    entry_data.seconds = entry_data.create_time & 0b11111; 
+    entry_data.seconds *= 2;
+    entry_data.minutes = (entry_data.create_time >> 5) & 0b111111;
+    entry_data.hours = (entry_data.create_time >> 11) & 0b11111;
+    entry_data.ms = get_bytes(file_system, offset + root_directory_entry_offset + 0x0D, 1);
+    // Add another second for odd seconds since the ms range is 0-199
+    if (entry_data.ms >= 100) {
+        entry_data.seconds += 1;
+        entry_data.ms -= 100;
+    }
+    entry_data.ms *= 10;
+
+    // Get date accessed information of entry
+    entry_data.access_date = get_bytes(file_system, offset + root_directory_entry_offset + 0x12, 2);
+    entry_data.access_day = entry_data.access_date & 0b11111;
+    entry_data.access_month = (entry_data.access_date >> 5) & 0b1111;
+    entry_data.access_year = (entry_data.access_date >> 9) & 0b111111;
+    // Year runs from 0-127, so start at year 1980
+    entry_data.access_year += 1980;
+
+    // Get date modified information of entry
+    entry_data.modify_date = get_bytes(file_system, offset + root_directory_entry_offset + 0x18, 2);
+    entry_data.modify_day = entry_data.modify_date & 0b11111;
+    entry_data.modify_month = (entry_data.modify_date >> 5) & 0b1111;
+    entry_data.modify_year = (entry_data.modify_date >> 9) & 0b1111111;
+    // Year runs from 0-127, so start at year 1980
+    entry_data.modify_year += 1980;
+
+    // Get time modified information of entry
+    entry_data.modify_time = get_bytes(file_system, offset + root_directory_entry_offset + 0x16, 2);
+    entry_data.modify_seconds = entry_data.modify_time & 0b11111;
+    // We only get 0-29 seconds, so multiply by 2 to get a full 60
+    entry_data.modify_seconds *= 2;
+    entry_data.modify_minutes = (entry_data.modify_time >> 5) & 0b111111;
+    entry_data.modify_hours = (entry_data.modify_time >> 11) & 0b11111;
+    entry_data.modify_ms = 0;
+}
+
 // Print out value at a given size and location
 void test_mmap(void *file_system) {
-    // if (invalid == 1) return;
     char type;
     int address;
     // Read type and location from stdin
@@ -47,112 +130,57 @@ void test_mmap(void *file_system) {
 }
 
 // Print out boot sector information from given image
-void test_boot_sector(void *file_system, int invalid) {
-    // if (invalid == 1) return;
+void test_boot_sector(void *file_system) {
     printf("OEM: ");
     // Print each letter of the OEM
     for (int i = 0; i < 8; i++) {
-        printf("%c", get_bytes(file_system, 0x003+i, 1));
+        printf("%c", get_bytes(file_system, 0x003 + i, 1));
     }
     printf("\n");
-    printf("Bytes per sector: %d\n", get_bytes(file_system, 0x00B, 2));
-    printf("Sectors per cluster: %d\n", get_bytes(file_system, 0x00D, 1));
-    printf("Reserved sectors: %d\n", get_bytes(file_system, 0x00E, 2));
-    printf("Num FATs: %d\n", get_bytes(file_system, 0x010, 1));
-    printf("Max root directory entries: %d\n", get_bytes(file_system, 0x011, 2));
-    printf("Num logical sectors: %d\n", get_bytes(file_system, 0x013, 2));
-    printf("Media Descriptor: %x\n", get_bytes(file_system, 0x015, 1));
-    printf("Sectors per FAT: %d\n", get_bytes(file_system, 0x016, 2));
+    printf("Bytes per sector: %d\n", data.bytes_per_sector);
+    printf("Sectors per cluster: %d\n", data.sectors_per_cluster);
+    printf("Reserved sectors: %d\n", data.reserved_sectors);
+    printf("Num FATs: %d\n", data.number_of_fats);
+    printf("Max root directory entries: %d\n", data.max_root_directory_entries);
+    printf("Num logical sectors: %d\n", data.num_logical_sectors);
+    printf("Media Descriptor: %x\n", data.media_descriptor);
+    printf("Sectors per FAT: %d\n", data.sectors_per_fat);
 }
 
 // Print out root directory entry information
 void test_directory_entry(void *file_system, int entry) {
-    // Store boot sector information
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-
-    // Get root directory starting byte
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
     // Get entry starting byte 
     int root_directory_entry_offset = entry * 32;
 
-    // Get date created information of entry
-    int create_date = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x10, 2);
-    int day = create_date & 0b11111;
-    int month = (create_date >> 5) & 0b1111;
-    int year = (create_date >> 9) & 0b1111111;
-    year += 1980;
-    
-    // Get time created information of entry
-    int create_time = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x0E, 2);
-    // We only get 0-29 seconds, so multiply by 2 to get a full 60
-    int seconds = create_time & 0b11111; 
-    seconds *= 2;
-    int minutes = (create_time >> 5) & 0b111111;
-    int hours = (create_time >> 11) & 0b11111;
-    int ms = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x0D, 1);
-    // Add another second for odd seconds since the ms range is 0-199
-    if (ms >= 100) {
-        seconds += 1;
-        ms -= 100;
-    }
-    ms *= 10;
-
-    // Get date accessed information of entry
-    int access_date = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x12, 2);
-    int access_day = access_date & 0b11111;
-    int access_month = (access_date >> 5) & 0b1111;
-    int access_year = (access_date >> 9) & 0b111111;
-    // Year runs from 0-127, so start at year 1980
-    access_year += 1980;
-
-    // Get date modified information of entry
-    int modify_date = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x18, 2);
-    int modify_day = modify_date & 0b11111;
-    int modify_month = (modify_date >> 5) & 0b1111;
-    int modify_year = (modify_date >> 9) & 0b1111111;
-    // printf("Mod year: %d\n", modify_year);
-    // Year runs from 0-127, so start at year 1980
-    modify_year += 1980;
-
-    // Get time modified information of entry
-    int modify_time = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x16, 2);
-    int modify_seconds = modify_time & 0b11111;
-    // We only get 0-29 seconds, so multiply by 2 to get a full 60
-    modify_seconds *= 2;
-    int modify_minutes = (modify_time >> 5) & 0b111111;
-    int modify_hours = (modify_time >> 11) & 0b11111;
-    int modify_ms = 0;
+    build_entry_data(file_system, data.root_directory_start, root_directory_entry_offset);
 
     // Determine if the entry is empty
-    if (get_bytes(file_system, root_directory_start + root_directory_entry_offset, 8) == 0) {
+    if (get_bytes(file_system, data.root_directory_start + root_directory_entry_offset, 8) == 0) {
         printf("Empty entry\n");
     } else {
         // Determine if entry was previously erased
-        if (get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) {
+        if (get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) {
             printf("Previously erased entry\n");
             printf("Name: ");
             printf("?");
         } else {
             printf("Name: ");
-            printf("%c", get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x00 + 0, 1));
+            printf("%c", get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x00 + 0, 1));
         }
         // Get file name
         for (int i = 1; i < 8; i++) {
-            printf("%c", get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x00 + i, 1));
+            printf("%c", get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x00 + i, 1));
         }
         printf(".");
         // Get file extension
         for (int i = 0; i < 3; i++) {
-            printf("%c", get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x08 + i, 1));
+            printf("%c", get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x08 + i, 1));
         }
         printf("\n");
+
         // Determine file attributes
-        int tmp = get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x0B, 1);
+        int tmp = get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x0B, 1);
         char *file_attributes;
-        // printf("fs: %d\n", tmp);
         if (tmp == 0x20) {
             file_attributes = "archive ";
         } else if (tmp == 0x10) {
@@ -173,28 +201,23 @@ void test_directory_entry(void *file_system, int entry) {
         
         // Print root directory entry information
         printf("File Attributes: %s\n", file_attributes);
-        printf("Create time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", year, month, day, hours, minutes, seconds, ms);
-        printf("Access date: %02d/%02d/%02d\n", access_year, access_month, access_day);
-        printf("Extended attributes: %d\n", get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x14, 2));
-        printf("Modify time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", modify_year, modify_month, modify_day, modify_hours, modify_minutes, modify_seconds, modify_ms);
-        printf("Start cluster: %d\n", get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x1A, 2));
-        printf("Bytes: %d\n", get_bytes(file_system, root_directory_start + root_directory_entry_offset + 0x1C, 4));
+        printf("Create time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", entry_data.year, entry_data.month, entry_data.day, entry_data.hours, entry_data.minutes, entry_data.seconds, entry_data.ms);
+        printf("Access date: %02d/%02d/%02d\n", entry_data.access_year, entry_data.access_month, entry_data.access_day);
+        printf("Extended attributes: %d\n", get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x14, 2));
+        printf("Modify time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", entry_data.modify_year, entry_data.modify_month, entry_data.modify_day, entry_data.modify_hours, entry_data.modify_minutes, entry_data.modify_seconds, entry_data.modify_ms);
+        printf("Start cluster: %d\n", get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x1A, 2));
+        printf("Bytes: %d\n", get_bytes(file_system, data.root_directory_start + root_directory_entry_offset + 0x1C, 4));
     }
 }
 
 // Print cluster linked list
 void test_file_clusters(void *file_system, int cluster) {
-    // Clusters 0 and 1 are reserved for the FAT id and EOF
+// Clusters 0 and 1 are reserved for the FAT id and EOF
     if (cluster < 2) {
         printf("EOF\n");
         return;
     }
 
-    // Get the start of the FAT
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int fat_start = bytes_per_sector * reserved_sectors;
-    
     // Start at given cluster
     int tmp = cluster;
     // Print linked list of clusters
@@ -202,27 +225,20 @@ void test_file_clusters(void *file_system, int cluster) {
         printf("%d", tmp);
         printf(" -> ");
         // Jump to the next node in linked list
-        tmp = get_bytes(file_system, fat_start + tmp*2, 2);
+        tmp = get_bytes(file_system, data.fat_start + tmp*2, 2);
     }
     printf("EOF\n");
 }
 
+
 // Finds file entries by file name and prints file information
 void test_file_name(void *file_system, char *filename) {
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-    int offset = root_directory_start;
-    int max_entries = get_bytes(file_system, 0x011, 2);
+    int offset = data.root_directory_start;
 
     // Split filename by '/' to look in each directory
     char *token = strtok(filename, "/");
     while (token != NULL) {
-        for (int i = 0; i < max_entries * 32; i += 32) {
+        for (int i = 0; i < data.max_entries * 32; i += 32) {
             // Empty entry
             if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
                 break;
@@ -246,7 +262,6 @@ void test_file_name(void *file_system, char *filename) {
 
             if (strcmp(token, name) == 0) {
                 int root_directory_entry_offset = i;
-                int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
 
                 // Determine file attributes
                 int tmp = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
@@ -261,55 +276,12 @@ void test_file_name(void *file_system, char *filename) {
 
                 // If the current entry is a directory, reset to the new cluster offset
                 if (strcmp(file_attributes, "subdir ") == 0) {
-                    offset = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
+                    int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
+                    offset = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
                     break;
                 }
 
-                // Get date created information of entry
-                int create_date = get_bytes(file_system, offset + root_directory_entry_offset + 0x10, 2);
-                int day = create_date & 0b11111;
-                int month = (create_date >> 5) & 0b1111;
-                int year = (create_date >> 9) & 0b1111111;
-                year += 1980;
-                
-                // Get time created information of entry
-                int create_time = get_bytes(file_system, offset + root_directory_entry_offset + 0x0E, 2);
-                // We only get 0-29 seconds, so multiply by 2 to get a full 60
-                int seconds = create_time & 0b11111; 
-                seconds *= 2;
-                int minutes = (create_time >> 5) & 0b111111;
-                int hours = (create_time >> 10) & 0b11111;
-                int ms = get_bytes(file_system, offset + root_directory_entry_offset + 0x0D, 1);
-                // Add another second for odd seconds since the ms range is 0-199
-                if (ms >= 100) {
-                    seconds += 1;
-                    ms -= 100;
-                }
-
-                // Get date accessed information of entry
-                int access_date = get_bytes(file_system, offset + root_directory_entry_offset + 0x12, 2);
-                int access_day = access_date & 0b11111;
-                int access_month = (access_date >> 5) & 0b1111;
-                int access_year = (access_date >> 9) & 0b111111;
-                // Year runs from 0-127, so start at year 1980
-                access_year += 1980;
-
-                // Get date modified information of entry
-                int modify_date = get_bytes(file_system, offset + root_directory_entry_offset + 0x18, 2);
-                int modify_day = modify_date & 0b11111;
-                int modify_month = (modify_date >> 5) & 0b1111;
-                int modify_year = (modify_date >> 9) & 0b111111;
-                // Year runs from 0-127, so start at year 1980
-                modify_year += 1980;
-
-                // Get time modified information of entry
-                int modify_time = get_bytes(file_system, offset + root_directory_entry_offset + 0x16, 2);
-                int modify_seconds = modify_time & 0b11111;
-                // We only get 0-29 seconds, so multiply by 2 to get a full 60
-                modify_seconds *= 2;
-                int modify_minutes = (modify_time >> 5) & 0b111111;
-                int modify_hours = (modify_time >> 11) & 0b11111;
-                int modify_ms = 0;
+                build_entry_data(file_system, offset, root_directory_entry_offset);
 
                 // Empty entry
                 if (get_bytes(file_system, offset + root_directory_entry_offset, 8) == 0) {
@@ -346,11 +318,12 @@ void test_file_name(void *file_system, char *filename) {
                         file_attributes = "";
                     }
 
+                    // Print entry information
                     printf("File Attributes: %s\n", file_attributes);
-                    printf("Create time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", year, month, day, hours, minutes, seconds, ms);
-                    printf("Access date: %02d/%02d/%02d\n", access_year, access_month, access_day);
+                    printf("Create time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", entry_data.year, entry_data.month, entry_data.day, entry_data.hours, entry_data.minutes, entry_data.seconds, entry_data.ms);
+                    printf("Access date: %02d/%02d/%02d\n", entry_data.access_year, entry_data.access_month, entry_data.access_day);
                     printf("Extended attributes: %d\n", get_bytes(file_system, offset + root_directory_entry_offset + 0x14, 2));
-                    printf("Modify time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", modify_year, modify_month, modify_day, modify_hours, modify_minutes, modify_seconds, modify_ms);
+                    printf("Modify time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", entry_data.modify_year, entry_data.modify_month, entry_data.modify_day, entry_data.modify_hours, entry_data.modify_minutes, entry_data.modify_seconds, entry_data.modify_ms);
                     printf("Start cluster: %d\n", get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2));
                     printf("Bytes: %d\n", get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4));
                 }
@@ -363,20 +336,12 @@ void test_file_name(void *file_system, char *filename) {
 
 // Print out the contents of a given filename
 void test_file_contents(void *file_system, char *filename) {
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-    int offset = root_directory_start;
-    int max_entries = get_bytes(file_system, 0x011, 2);
+    int offset = data.root_directory_start;
 
     // Split filename by '/' to look in each directory
     char *token = strtok(filename, "/");
     while (token != NULL) {
-        for (int i = 0; i < max_entries * 32; i += 32) {
+        for (int i = 0; i < data.max_entries * 32; i += 32) {
             // Empty entry
             if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
                 break;
@@ -399,7 +364,6 @@ void test_file_contents(void *file_system, char *filename) {
             }
             if (strcmp(token, name) == 0) {
                 int root_directory_entry_offset = i;
-                int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
 
                 // Determine file attributes
                 int tmp = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
@@ -412,14 +376,15 @@ void test_file_contents(void *file_system, char *filename) {
                     file_attributes = "";
                 }
 
+                int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
                 // If the current entry is a directory, reset to the new cluster offset
                 if (strcmp(file_attributes, "subdir ") == 0) {
-                    offset = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
+                    offset = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
                     break;
                 } else {
                     // Print out file contents
                     int filesize = get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
-                    int file_start_offset = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
+                    int file_start_offset = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
                     for (int i = 0; i < filesize; i++) {
                         printf("%c", get_bytes(file_system, file_start_offset + i, 1));
                     }
@@ -431,18 +396,9 @@ void test_file_contents(void *file_system, char *filename) {
     }
 }
 
-void search_fs(void *file_system, int offset, int max_entries, int *num_root_dir_files, int *num_files, int *num_dirs) {
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-
+void search_fs(void *file_system, int offset, int *num_root_dir_files, int *num_files, int *num_dirs) {
     // Loop through current directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -458,8 +414,8 @@ void search_fs(void *file_system, int offset, int max_entries, int *num_root_dir
             (*num_dirs)++;
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs(file_system, jump, max_entries, num_root_dir_files, num_files, num_dirs);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs(file_system, jump, num_root_dir_files, num_files, num_dirs);
         }
     }
 }
@@ -470,19 +426,10 @@ void test_num_entries(void *file_system) {
     int num_files = 0;
     int num_dirs = 0;
 
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-    int offset = root_directory_start;
-    int max_entries = get_bytes(file_system, 0x011, 2);
+    int offset = data.root_directory_start;
 
     // Loop through the root directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -499,8 +446,8 @@ void test_num_entries(void *file_system) {
             num_dirs++;
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs(file_system, jump, max_entries, &num_root_dir_files, &num_files, &num_dirs);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs(file_system, jump, &num_root_dir_files, &num_files, &num_dirs);
         }
     }
 
@@ -509,18 +456,9 @@ void test_num_entries(void *file_system) {
     printf("Number of directories in the file system: %d\n", num_dirs);
 }
 
-void search_fs_2(void *file_system, int offset, int max_entries, int *max_file_size, char curr_name[100], char file_name[100]) {
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-
+void search_fs_2(void *file_system, int offset, int *max_file_size, char curr_name[100], char file_name[100]) {
     // Loop through the current directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0 || get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E || get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0xE5) {
             break;
@@ -558,31 +496,23 @@ void search_fs_2(void *file_system, int offset, int max_entries, int *max_file_s
         } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs_2(file_system, jump, max_entries, max_file_size, curr_name, file_name);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs_2(file_system, jump, max_file_size, curr_name, file_name);
         }
     }
 }
 
+// TODO: Fix for vfs-hidden, vfs-2, vfs-3, vfs-4, vfs-5
 // Prints out the size and path of the largest file in the given file system
 void test_largest_file(void *file_system) {
     int curr_file_size = 0;
     int max_file_size = 0;
     char file_name[100] = "";
 
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-    int offset = root_directory_start;
-    int max_entries = get_bytes(file_system, 0x011, 2);
+    int offset = data.root_directory_start;
     
     // Loop through the root directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -621,26 +551,17 @@ void test_largest_file(void *file_system) {
         } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs_2(file_system, jump, max_entries, &max_file_size, curr_name, file_name);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs_2(file_system, jump, &max_file_size, curr_name, file_name);
         }
     }
     
     printf("Largest file (%d bytes): %s\n", max_file_size, file_name);
 }
 
-void search_fs_3(void *file_system, int offset, int max_entries, int *size_of_files) {
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-
+void search_fs_3(void *file_system, int offset, int *size_of_files) {
     // Loop through the current directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -655,12 +576,13 @@ void search_fs_3(void *file_system, int offset, int max_entries, int *size_of_fi
         } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs_3(file_system, jump, max_entries, size_of_files);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs_3(file_system, jump, size_of_files);
         }
     }
 }
 
+// TODO: Work for vfs-hidden
 // Prints out space usage statistics of the given file system
 void test_space_usage(void *file_system) {
     int capacity = 0;
@@ -670,19 +592,10 @@ void test_space_usage(void *file_system) {
     int unused_all_space = 0;
     int unall_space = 0;
 
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-    int offset = root_directory_start;
-    int max_entries = get_bytes(file_system, 0x011, 2);
+    int offset = data.root_directory_start;
 
     // Loop through the root directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -697,24 +610,22 @@ void test_space_usage(void *file_system) {
         } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs_3(file_system, jump, max_entries, &size_of_files);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs_3(file_system, jump, &size_of_files);
         }
     }
 
     // Calculate FAT table start and size to get active entries
-    int fat_start = bytes_per_sector * reserved_sectors;
-    int fat_size = bytes_per_sector * sectors_per_fat;
-    for (int i = fat_start + 4; i < fat_size; i += 2) {
+    for (int i = data.fat_start + 4; i < data.fat_size; i += 2) {
         if (!(get_bytes(file_system, i, 2) == 0)) active_entry_count++;
     }
 
     // Get number of logical sectors
-    int tmp = get_bytes(file_system, 0x013, 2);
+    int tmp = data.num_logical_sectors;
     if (tmp == 0) tmp = get_bytes(file_system, 0x020, 4);
 
-    capacity = get_bytes(file_system, 0x00B, 2) * tmp;
-    all_space = active_entry_count * (bytes_per_sector * sectors_per_cluster);
+    capacity = data.bytes_per_sector * tmp;
+    all_space = active_entry_count * (data.bytes_per_sector * data.sectors_per_cluster);
     unused_all_space = all_space - size_of_files;
     unall_space = capacity - all_space;
 
@@ -725,6 +636,7 @@ void test_space_usage(void *file_system) {
     printf("Unallocated space: %d\n", unall_space);
 }
 
+// TODO: Actually implement
 // Looks for a file with the cookie in the given file system and prints the path and cluster
 void test_cookie(void *file_system) {
     char *file_path = "";
@@ -734,16 +646,7 @@ void test_cookie(void *file_system) {
     printf("Starting cluster for file with cookie: %d\n", start_cluster);
 }
 
-void search_fs_4(void *file_system, int offset, int max_entries, int *curr_level, int *max_level) {
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-
+void search_fs_4(void *file_system, int offset, int *curr_level, int *max_level) {
     // Increase directory level since we recursed into a directory
     (*curr_level)++;
     if (*curr_level > *max_level) {
@@ -751,7 +654,7 @@ void search_fs_4(void *file_system, int offset, int max_entries, int *curr_level
     }
 
     // Loop through the current directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -763,8 +666,8 @@ void search_fs_4(void *file_system, int offset, int max_entries, int *curr_level
         int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
         if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs_4(file_system, jump, max_entries, curr_level, max_level);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs_4(file_system, jump, curr_level, max_level);
             // After recursing through a directory, travel back up
             (*curr_level)--;
         }
@@ -777,19 +680,10 @@ void test_num_dir_levels(void *file_system) {
     int curr_level = 1;
     int max_level = 1;
 
-    // Compute root directory start
-    int bytes_per_sector = get_bytes(file_system, 0x00B, 2);
-    int reserved_sectors = get_bytes(file_system, 0x00E, 2);
-    int sectors_per_fat = get_bytes(file_system, 0x016, 2);
-    int number_of_fats = get_bytes(file_system, 0x010, 1);
-    int sectors_per_cluster = get_bytes(file_system, 0x00D, 1);
-
-    int root_directory_start = (bytes_per_sector * reserved_sectors) + (bytes_per_sector * sectors_per_fat * number_of_fats);
-    int offset = root_directory_start;
-    int max_entries = get_bytes(file_system, 0x011, 2);
+    int offset = data.root_directory_start;
 
     // Loop through the root directory
-    for (int i = 0; i < max_entries * 32; i += 32) {
+    for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
@@ -801,8 +695,8 @@ void test_num_dir_levels(void *file_system) {
         int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
         if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((bytes_per_sector * sectors_per_cluster) * (start_cluster - 2)) + ((32 * max_entries) + root_directory_start);
-            search_fs_4(file_system, jump, max_entries, &curr_level, &max_level);
+            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
+            search_fs_4(file_system, jump, &curr_level, &max_level);
             // After recursing through a directory, travel back up
             curr_level--;
         }
@@ -811,6 +705,7 @@ void test_num_dir_levels(void *file_system) {
     printf("Directory hierarchy levels: %d\n", max_level);
 }
 
+// TODO: Actually implement
 // Prints out the oldest file in the given file system
 void test_oldest_file(void *file_system) {
     char *file_name = "";
@@ -826,6 +721,11 @@ void output_fs_data(void *file_system) {
     test_cookie(file_system);
     test_num_dir_levels(file_system);
     test_oldest_file(file_system);
+}
+
+// TODO: Actually implement
+void write_fs_data(void *file_system) {
+
 }
 
 int main(int argc, char **argv) {
@@ -857,18 +757,11 @@ int main(int argc, char **argv) {
     int cluster;
     int c;
     char mode;
-    int invalid = 0;
     char *filename;
     while ((c = getopt_long(argc, argv, "mbveslkufawd:c:i:n:o:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'i':
                 image = optarg;
-                break;
-            case 'm':
-                mode = c;
-                break;
-            case 'b':
-                mode = c;
                 break;
             case 'd':
                 entry = atoi(optarg);
@@ -878,9 +771,8 @@ int main(int argc, char **argv) {
                 cluster = atoi(optarg);
                 mode = c;
                 break;
-            case 'v':
-                invalid = 1;
-                break;
+            case 'b':
+            case 'm':
             case 'n':
             case 'o':
                 mode = c;
@@ -909,13 +801,15 @@ int main(int argc, char **argv) {
     int size = st.st_size;
     void *file_system = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
 
+    build_fs_data(file_system);
+
     // Test filesystem
     switch (mode) {
         case 'm':
             test_mmap(file_system);
             break;
         case 'b':
-            test_boot_sector(file_system, invalid);
+            test_boot_sector(file_system);
             break;
         case 'd':
             test_directory_entry(file_system, entry);
@@ -951,6 +845,7 @@ int main(int argc, char **argv) {
             output_fs_data(file_system);
             break;
         case 'w':
+            write_fs_data(file_system);
             break;
         default:
             break;
