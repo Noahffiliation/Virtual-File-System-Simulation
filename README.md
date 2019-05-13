@@ -18,13 +18,19 @@ The `--test-file-contents` optional argument searches the image for a specifed f
 
 The `--test-num-entries` optional argument searches the file system for the number of files and directories.
 
+The `--test-space-usage` optional argument calculates the space usage statistics for the given file system.
+
 The `--test-largest-file` optional argument searches the file system for the largest file and the path to the file.
 
-The `--test-space-usage` optional argument calculates the space usage statistics for the given file system.
+The `--test-cookie` optional argument searches all of the files in the file system for a particular string.
 
 The `--test-num-dir-levels` optional argument searches the file system for the deepest level of subdirectories.
 
-The `--write-fs-data` optional argument is supposed to write out the contents of Milestone 4 to a file and place it in the given image. Currently, the program with this argument does not actually do anything.
+The `--test-oldest-file` optional argument searches the file system for the oldest file.
+
+The `--output-fs-data` optional argument prints out the results of the previous 6 parameters.
+
+The `--write-fs-data` optional argument is supposed to write out the contents of `--output-fs-data` to a file and place it in the given image. Currently, the program with this argument does not actually do anything.
 
 ## Build
 To build the `fs` executable:
@@ -41,7 +47,7 @@ $ ./fs --image <image> --<optional test parameter>
 ```
 $ runtest --tool=fs <optional specified test files>
 ```
-Currently, there are 1013 passes out of 1052 tests because Milestones 4 and 5 are unfinished.
+Currently, there are 1013 passes out of 1052 tests because some test parameters are not implemented yet.
 
 It takes about 7 minutes to run the entire test suite.
 
