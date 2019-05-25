@@ -28,7 +28,7 @@ struct entry {
 unsigned int get_bytes(void *file_system, int offset, int size) {
     unsigned int bytes = 0;
     for (int i = 0; i < size; i++) {
-        // Bitwise or the filesystem bytes into place and leftshift to read more up to size
+        // Bitwise or the file system bytes into place and leftshift to read more up to size
         bytes |= ((unsigned char *)file_system)[offset + i] << i * 8;
     }
     return bytes;
@@ -212,7 +212,7 @@ void test_directory_entry(void *file_system, int entry) {
 
 // Print cluster linked list
 void test_file_clusters(void *file_system, int cluster) {
-// Clusters 0 and 1 are reserved for the FAT id and EOF
+    // Clusters 0 and 1 are reserved for the FAT id and EOF
     if (cluster < 2) {
         printf("EOF\n");
         return;
@@ -225,7 +225,7 @@ void test_file_clusters(void *file_system, int cluster) {
         printf("%d", tmp);
         printf(" -> ");
         // Jump to the next node in linked list
-        tmp = get_bytes(file_system, data.fat_start + tmp*2, 2);
+        tmp = get_bytes(file_system, data.fat_start + tmp * 2, 2);
     }
     printf("EOF\n");
 }
@@ -396,74 +396,21 @@ void test_file_contents(void *file_system, char *filename) {
     }
 }
 
-void search_fs(void *file_system, int offset, int *num_root_dir_files, int *num_files, int *num_dirs) {
+// Search file system for all possible attributes/statistics
+void search_fs(void *file_system, int offset, int *num_root_dir_files, int *num_files, int *num_dirs, char curr_name[100], char file_name[100], int *max_file_size, int *size_of_files, int *curr_level, int *max_level) {
+    // Increase directory level since we recursed into a directory
+    (*curr_level)++;
+    if (*curr_level > *max_level) {
+        *max_level = *curr_level;
+    }
+    
     // Loop through current directory
     for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
-        if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
-            break;
-        }
-        
-        int root_directory_entry_offset = i;
-
-        // Determine file attributes
-        int tmp = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (tmp == 0x20 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
-            (*num_files)++;
-        } else if (tmp == 0x10 && !(get_bytes(file_system, offset + i + 0x00, 1) == 0x2E) && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
-            (*num_dirs)++;
-            // Calculate the starting offset for next directory
-            int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs(file_system, jump, num_root_dir_files, num_files, num_dirs);
-        }
-    }
-}
-
-// Prints the number of files and directories in the given file system
-void test_num_entries(void *file_system) {
-    int num_root_dir_files = 0;
-    int num_files = 0;
-    int num_dirs = 0;
-
-    int offset = data.root_directory_start;
-
-    // Loop through the root directory
-    for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count for total numbers
-        if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
-            break;
-        }
-
-        int root_directory_entry_offset = i;
-
-        // Determine file attributes
-        int tmp = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (tmp == 0x20 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
-            num_root_dir_files++;
-            num_files++;
-        } else if (tmp == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
-            num_dirs++;
-            // Calculate the starting offset for next directory
-            int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs(file_system, jump, &num_root_dir_files, &num_files, &num_dirs);
-        }
-    }
-
-    printf("Number of files in root directory: %d\n", num_root_dir_files);
-    printf("Number of files in the file system: %d\n", num_files);
-    printf("Number of directories in the file system: %d\n", num_dirs);
-}
-
-void search_fs_2(void *file_system, int offset, int *max_file_size, char curr_name[100], char file_name[100]) {
-    // Loop through the current directory
-    for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0 || get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E || get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0xE5) {
             break;
         }
-
+        
         int root_directory_entry_offset = i;
 
         // Get file name
@@ -486,34 +433,58 @@ void search_fs_2(void *file_system, int offset, int *max_file_size, char curr_na
         }
 
         // Determine file attributes
-        int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (file_attr == 0x20) {
+        int tmp = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
+        if (tmp == 0x20 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
+            (*num_files)++;
             int curr_file_size = get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
             if (curr_file_size > *max_file_size) {
                 *max_file_size = curr_file_size;
                 strcpy(file_name, curr_name);
             }
-        } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
+            *size_of_files += get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
+        } else if (tmp == 0x10 && !(get_bytes(file_system, offset + i + 0x00, 1) == 0x2E) && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
+            (*num_dirs)++;
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
             int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs_2(file_system, jump, max_file_size, curr_name, file_name);
+            search_fs(file_system, jump, num_root_dir_files, num_files, num_dirs, curr_name, file_name, max_file_size, size_of_files, curr_level, max_level);
+            // After recursing through a directory, travel back up
+            (*curr_level)--;
         }
     }
 }
 
-// TODO: Fix for vfs-hidden, vfs-2, vfs-3, vfs-4, vfs-5
-// Prints out the size and path of the largest file in the given file system
-void test_largest_file(void *file_system) {
+// Prints the number of files and directories in the given file system
+void get_stats(void *file_system, char mode) {
+    int num_root_dir_files = 0;
+    int num_files = 0;
+    int num_dirs = 0;
+
     int curr_file_size = 0;
     int max_file_size = 0;
     char file_name[100] = "";
+    
+    int capacity = 0;
+    int active_entry_count = 0;
+    int all_space = 0;
+    int size_of_files = 0;
+    int unused_all_space = 0;
+    int unall_space = 0;
+
+    // Root level is the first level
+    int curr_level = 1;
+    int max_level = 1;
+
+    char *file_path = "";
+    int start_cluster = 0;
+
+    char *oldest_file_name = "";
 
     int offset = data.root_directory_start;
-    
+
     // Loop through the root directory
     for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count
+        // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
             break;
         }
@@ -541,186 +512,69 @@ void test_largest_file(void *file_system) {
         }
 
         // Determine file attributes
-        int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (file_attr == 0x20) {
+        int tmp = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
+        if (tmp == 0x20 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
+            num_root_dir_files++;
+            num_files++;
+            size_of_files += get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
             curr_file_size = get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
             if (curr_file_size > max_file_size) {
                 max_file_size = curr_file_size;
                 strcpy(file_name, curr_name);
             }
-        } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
+        } else if (tmp == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
+            num_dirs++;
             // Calculate the starting offset for next directory
             int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
             int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs_2(file_system, jump, &max_file_size, curr_name, file_name);
-        }
-    }
-    
-    printf("Largest file (%d bytes): %s\n", max_file_size, file_name);
-}
-
-void search_fs_3(void *file_system, int offset, int *size_of_files) {
-    // Loop through the current directory
-    for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count for total numbers
-        if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
-            break;
-        }
-
-        int root_directory_entry_offset = i;
-
-        // Determine file attributes
-        int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (file_attr == 0x20) {
-            *size_of_files += get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
-        } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
-            // Calculate the starting offset for next directory
-            int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs_3(file_system, jump, size_of_files);
-        }
-    }
-}
-
-// TODO: Work for vfs-hidden
-// Prints out space usage statistics of the given file system
-void test_space_usage(void *file_system) {
-    int capacity = 0;
-    int active_entry_count = 0;
-    int all_space = 0;
-    int size_of_files = 0;
-    int unused_all_space = 0;
-    int unall_space = 0;
-
-    int offset = data.root_directory_start;
-
-    // Loop through the root directory
-    for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count for total numbers
-        if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
-            break;
-        }
-
-        int root_directory_entry_offset = i;
-
-        // Determine file attributes
-        int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (file_attr == 0x20) {
-            size_of_files += get_bytes(file_system, offset + root_directory_entry_offset + 0x1C, 4);
-        } else if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
-            // Calculate the starting offset for next directory
-            int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs_3(file_system, jump, &size_of_files);
+            search_fs(file_system, jump, &num_root_dir_files, &num_files, &num_dirs, curr_name, file_name, &max_file_size, &size_of_files, &curr_level, &max_level);
         }
     }
 
-    // Calculate FAT table start and size to get active entries
-    for (int i = data.fat_start + 4; i < data.fat_size; i += 2) {
-        if (!(get_bytes(file_system, i, 2) == 0)) active_entry_count++;
-    }
-
-    // Get number of logical sectors
-    int tmp = data.num_logical_sectors;
-    if (tmp == 0) tmp = get_bytes(file_system, 0x020, 4);
-
-    capacity = data.bytes_per_sector * tmp;
-    all_space = active_entry_count * (data.bytes_per_sector * data.sectors_per_cluster);
-    unused_all_space = all_space - size_of_files;
-    unall_space = capacity - all_space;
-
-    printf("Total capacity of the file system: %d\n", capacity);
-    printf("Total allocated space: %d\n", all_space);
-    printf("Total size of files: %d\n", size_of_files);
-    printf("Unused, but allocated, space (for files): %d\n", unused_all_space);
-    printf("Unallocated space: %d\n", unall_space);
-}
-
-// TODO: Actually implement
-// Looks for a file with the cookie in the given file system and prints the path and cluster
-void test_cookie(void *file_system) {
-    char *file_path = "";
-    int start_cluster = 0;
-
-    printf("Path to file with cookie: %s\n", file_path);
-    printf("Starting cluster for file with cookie: %d\n", start_cluster);
-}
-
-void search_fs_4(void *file_system, int offset, int *curr_level, int *max_level) {
-    // Increase directory level since we recursed into a directory
-    (*curr_level)++;
-    if (*curr_level > *max_level) {
-        *max_level = *curr_level;
-    }
-
-    // Loop through the current directory
-    for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count for total numbers
-        if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
-            break;
+    if (mode == 'e') {
+        printf("Number of files in root directory: %d\n", num_root_dir_files);
+        printf("Number of files in the file system: %d\n", num_files);
+        printf("Number of directories in the file system: %d\n", num_dirs);
+    } else if (mode == 's') {
+        // Calculate FAT table start and size to get active entries
+        for (int i = data.fat_start + 4; i < data.fat_size; i += 2) {
+            if (!(get_bytes(file_system, i, 2) == 0)) active_entry_count++;
         }
 
-        int root_directory_entry_offset = i;
+        // Get number of logical sectors
+        int tmp = data.num_logical_sectors;
+        if (tmp == 0) tmp = get_bytes(file_system, 0x020, 4);
 
-        // Determine file attributes
-        int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5) && !(get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E)) {
-            int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs_4(file_system, jump, curr_level, max_level);
-            // After recursing through a directory, travel back up
-            (*curr_level)--;
-        }
+        capacity = data.bytes_per_sector * tmp;
+        all_space = active_entry_count * (data.bytes_per_sector * data.sectors_per_cluster);
+        unused_all_space = all_space - size_of_files;
+        unall_space = capacity - all_space;
+
+        printf("Total capacity of the file system: %d\n", capacity);
+        printf("Total allocated space: %d\n", all_space);
+        printf("Total size of files: %d\n", size_of_files);
+        printf("Unused, but allocated, space (for files): %d\n", unused_all_space);
+        printf("Unallocated space: %d\n", unall_space);
+    } else if (mode == 'l') {
+        printf("Largest file (%d bytes): %s\n", max_file_size, file_name);
+    } else if (mode == 'k') {
+        printf("Path to file with cookie: %s\n", file_path);
+        printf("Starting cluster for file with cookie: %d\n", start_cluster);
+    } else if (mode == 'u') {
+        printf("Directory hierarchy levels: %d\n", max_level);
+    } else if (mode == 'f') {
+        printf("Oldest file: %s\n", oldest_file_name);
     }
-}
-
-// Prints out the deepest level of any file in the given file system
-void test_num_dir_levels(void *file_system) {
-    // Root level is the first level
-    int curr_level = 1;
-    int max_level = 1;
-
-    int offset = data.root_directory_start;
-
-    // Loop through the root directory
-    for (int i = 0; i < data.max_entries * 32; i += 32) {
-        // Empty entry, doesn't count
-        if (get_bytes(file_system, offset + i + 0x00, 1) == 0) {
-            break;
-        }
-
-        int root_directory_entry_offset = i;
-
-        // Determine file attributes
-        int file_attr = get_bytes(file_system, offset + root_directory_entry_offset + 0x0B, 1);
-        if (file_attr == 0x10 && !(get_bytes(file_system, offset + root_directory_entry_offset + 0x00 + 0, 1) == 0xE5)) {
-            int start_cluster = get_bytes(file_system, offset + root_directory_entry_offset + 0x1A, 2);
-            int jump = ((data.bytes_per_sector * data.sectors_per_cluster) * (start_cluster - 2)) + ((32 * data.max_entries) + data.root_directory_start);
-            search_fs_4(file_system, jump, &curr_level, &max_level);
-            // After recursing through a directory, travel back up
-            curr_level--;
-        }
-    }
-
-    printf("Directory hierarchy levels: %d\n", max_level);
-}
-
-// TODO: Actually implement
-// Prints out the oldest file in the given file system
-void test_oldest_file(void *file_system) {
-    char *file_name = "";
-
-    printf("Oldest file: %s\n", file_name);
 }
 
 // Prints out all of the file system data of a given file system
 void output_fs_data(void *file_system) {
-    test_num_entries(file_system);
-    test_space_usage(file_system);
-    test_largest_file(file_system);
-    test_cookie(file_system);
-    test_num_dir_levels(file_system);
-    test_oldest_file(file_system);
+    get_stats(file_system, 'e');
+    get_stats(file_system, 's');
+    get_stats(file_system, 'l');
+    get_stats(file_system, 'k');
+    get_stats(file_system, 'u');
+    get_stats(file_system, 'f');
 }
 
 // TODO: Actually implement
@@ -826,22 +680,12 @@ int main(int argc, char **argv) {
             test_file_contents(file_system, filename);
             break;
         case 'e':
-            test_num_entries(file_system);
-            break;
         case 's':
-            test_space_usage(file_system);
-            break;
         case 'l':
-            test_largest_file(file_system);
-            break;
         case 'k':
-            test_cookie(file_system);
-            break;
         case 'u':
-            test_num_dir_levels(file_system);
-            break;
         case 'f':
-            test_oldest_file(file_system);
+            get_stats(file_system, mode);
             break;
         case 'a':
             output_fs_data(file_system);

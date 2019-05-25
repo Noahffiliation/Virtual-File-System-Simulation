@@ -47,9 +47,9 @@ $ ./fs --image <image> --<optional test parameter>
 ```
 $ runtest --tool=fs <optional specified test files>
 ```
-Currently, there are 1013 passes out of 1052 tests because some test parameters are not implemented yet.
+Currently, there are 997 passes out of 1052 tests because some test parameters are not implemented yet.
 
-It takes about 7 minutes to run the entire test suite.
+It takes about 2 minutes to run the entire test suite.
 
 ## Notes
 Only one optional argument may be used at a time.
