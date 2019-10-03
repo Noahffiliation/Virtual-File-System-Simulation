@@ -1,6 +1,23 @@
 # Virtual File System Simulation
 This lab involved testing various attributes of virtual file system images in the FAT16 format. Each aspect of a FAT16 file system is convered in a different test parameter when running the program.
 
+## Requirements
+- dejagnu for `runtest`
+```
+sudo apt install dejagnu
+```
+
+## Build
+To build the `fs` executable:
+```
+$ gcc -o fs fs.c
+```
+
+## Run
+```
+$ ./fs --image <image> --<optional test parameter>
+```
+
 ## Parameters
 The program takes in the required argument `--image`, which takes in an image file and loads it into memory with `mmap()`.
 
@@ -32,22 +49,11 @@ The `--output-fs-data` optional argument prints out the results of the previous 
 
 The `--write-fs-data` optional argument is supposed to write out the contents of `--output-fs-data` to a file and place it in the given image. Currently, the program with this argument does not actually do anything.
 
-## Build
-To build the `fs` executable:
-```
-$ gcc -o fs fs.c
-```
-
-## Run
-```
-$ ./fs --image <image> --<optional test parameter>
-```
-
 ## Test
 ```
 $ runtest --tool=fs <optional specified test files>
 ```
-Currently, there are 997 passes out of 1052 tests because some test parameters are not implemented yet.
+Currently, there are 1006 passes out of 1052 tests because some test parameters are not implemented yet.
 
 It takes about 2 minutes to run the entire test suite.
 
