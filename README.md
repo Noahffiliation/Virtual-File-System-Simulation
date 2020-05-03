@@ -9,8 +9,8 @@ sudo apt install dejagnu
 
 ## Build
 To build the `fs` executable:
-```
-$ gcc -o fs fs.c
+```bash
+$ make
 ```
 
 ## Run
