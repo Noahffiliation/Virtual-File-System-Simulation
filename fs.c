@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h> 
+#include <fcntl.h>
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -58,11 +58,11 @@ void build_entry_data(void *file_system, int offset, int root_directory_entry_of
     entry_data.month = (entry_data.create_date >> 5) & 0b1111;
     entry_data.year = (entry_data.create_date >> 9) & 0b1111111;
     entry_data.year += 1980;
-    
+
     // Get time created information of entry
     entry_data.create_time = get_bytes(file_system, offset + root_directory_entry_offset + 0x0E, 2);
     // We only get 0-29 seconds, so multiply by 2 to get a full 60
-    entry_data.seconds = entry_data.create_time & 0b11111; 
+    entry_data.seconds = entry_data.create_time & 0b11111;
     entry_data.seconds *= 2;
     entry_data.minutes = (entry_data.create_time >> 5) & 0b111111;
     entry_data.hours = (entry_data.create_time >> 11) & 0b11111;
@@ -149,7 +149,7 @@ void test_boot_sector(void *file_system) {
 
 // Print out root directory entry information
 void test_directory_entry(void *file_system, int entry) {
-    // Get entry starting byte 
+    // Get entry starting byte
     int root_directory_entry_offset = entry * 32;
 
     build_entry_data(file_system, data.root_directory_start, root_directory_entry_offset);
@@ -192,13 +192,13 @@ void test_directory_entry(void *file_system, int entry) {
         } else if (tmp == 36) {
             file_attributes = "Sys archive ";
         } else if (tmp == 33) {
-            file_attributes = "RO archive ";  
+            file_attributes = "RO archive ";
         } else if (tmp == 15) {
             file_attributes = "RO Hidden Sys Vol. label ";
         } else {
             file_attributes = "";
         }
-        
+
         // Print root directory entry information
         printf("File Attributes: %s\n", file_attributes);
         printf("Create time: %02d/%02d/%02d %02d:%02d:%02d.%03d\n", entry_data.year, entry_data.month, entry_data.day, entry_data.hours, entry_data.minutes, entry_data.seconds, entry_data.ms);
@@ -403,14 +403,14 @@ void search_fs(void *file_system, int offset, int *num_root_dir_files, int *num_
     if (*curr_level > *max_level) {
         *max_level = *curr_level;
     }
-    
+
     // Loop through current directory
     for (int i = 0; i < data.max_entries * 32; i += 32) {
         // Empty entry, doesn't count for total numbers
         if (get_bytes(file_system, offset + i + 0x00, 1) == 0 || get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0x2E || get_bytes(file_system, offset + i + 0x00 + 0, 1) == 0xE5) {
             break;
         }
-        
+
         int root_directory_entry_offset = i;
 
         // Get file name
@@ -463,7 +463,7 @@ void get_stats(void *file_system, char mode) {
     int curr_file_size = 0;
     int max_file_size = 0;
     char file_name[100] = "";
-    
+
     int capacity = 0;
     int active_entry_count = 0;
     int all_space = 0;
@@ -656,6 +656,7 @@ int main(int argc, char **argv) {
     stat(image, &st);
     int size = st.st_size;
     void *file_system = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    close(fd);
 
     build_fs_data(file_system);
 
